@@ -1,0 +1,51 @@
+TABLE_PROCESS_ARGV: (null) 
+TABLE_EXEC_SUCCESS: listening tun0 
+TABLE_CNC_DOMAIN: pi-CNC.lan 
+TABLE_CNC_PORT:  
+TABLE_KILLER_SAFE: https://youtu.be/dQw4w9WgXcQ 
+TABLE_KILLER_PROC: /proc/ 
+TABLE_KILLER_EXE: /exe 
+TABLE_KILLER_DELETED:  (deleted) 
+TABLE_KILLER_FD: /fd 
+TABLE_KILLER_ANIME: .anime 
+TABLE_KILLER_STATUS: /status 
+TABLE_MEM_QBOT: REPORT %s:%s 
+TABLE_MEM_QBOT2: HTTPFLOOD 
+TABLE_MEM_QBOT3: LOLNOGTFO 
+TABLE_MEM_UPX: \x58\x4D\x4E\x4E\x43\x50\x46\x22 
+TABLE_MEM_ZOLLARD: zollard 
+TABLE_MEM_REMAITEN: GETLOCALIP 
+TABLE_SCAN_CB_DOMAIN: report.changeme.com 
+TABLE_SCAN_CB_PORT: »å 
+TABLE_SCAN_SHELL: shell 
+TABLE_SCAN_ENABLE: enable 
+TABLE_SCAN_SYSTEM: system 
+TABLE_SCAN_SH: sh 
+TABLE_SCAN_QUERY: /bin/busybox MIRAI 
+TABLE_SCAN_RESP: MIRAI: applet not found 
+TABLE_SCAN_NCORRECT: ncorrect 
+TABLE_SCAN_PS: /bin/busybox ps 
+TABLE_SCAN_KILL_9: /bin/busybox kill -9  
+TABLE_ATK_VSE: TSource Engine Query 
+TABLE_ATK_RESOLVER: /etc/resolv.conf 
+TABLE_ATK_NSERV: nameserver  
+TABLE_ATK_KEEP_ALIVE: Connection: keep-alive 
+TABLE_ATK_ACCEPT: Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8 
+TABLE_ATK_ACCEPT_LNG: Accept-Language: en-US,en;q=0.8 
+TABLE_ATK_CONTENT_TYPE: Content-Type: application/x-www-form-urlencoded 
+TABLE_ATK_SET_COOKIE: setCookie(' 
+TABLE_ATK_REFRESH_HDR: refresh: 
+TABLE_ATK_LOCATION_HDR: location: 
+TABLE_ATK_SET_COOKIE_HDR: set-cookie: 
+TABLE_ATK_CONTENT_LENGTH_HDR: content-length: 
+TABLE_ATK_TRANSFER_ENCODING_HDR: transfer-encoding: 
+TABLE_ATK_CHUNKED: chunked 
+TABLE_ATK_KEEP_ALIVE_HDR: keep-alive 
+TABLE_ATK_CONNECTION_HDR: connection: 
+TABLE_ATK_DOSARREST: server: dosarrest 
+TABLE_ATK_CLOUDFLARE_NGINX: server: cloudflare-nginx 
+TABLE_HTTP_ONE: Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36 
+TABLE_HTTP_TWO: Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36 
+TABLE_HTTP_THREE: Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36 
+TABLE_HTTP_FOUR: Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36 
+TABLE_HTTP_FIVE: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/601.7.7 (KHTML, like Gecko) Version/9.1.2 Safari/601.7.7 
