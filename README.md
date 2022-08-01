@@ -1,3 +1,5 @@
+This repo is a a collection of some of the practical work I conducted for My Dissertation. Source code analysis was done on the code for the bot, changes were made to the build.sh script so that the bot would compile properly, and a script was made to decrypt the obsfucated table from table.c/.h
+
 # Mirai BotNet
 Leaked Linux.Mirai Source Code for Research/IoT Development Purposes
 
